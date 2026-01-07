@@ -10,6 +10,10 @@ An AI-powered IT Service Management platform with intelligent workflow orchestra
 
 - [Docker](https://docs.docker.com/get-docker/) (Docker Desktop on Windows/Mac)
 - [Docker Compose](https://docs.docker.com/compose/install/) (included in Docker Desktop)
+- **Local LLM** - [Ollama](https://ollama.ai/) with Qwen 2.5 7B recommended:
+  ```bash
+  ollama pull qwen2.5:7b
+  ```
 
 ### Installation
 
@@ -108,6 +112,8 @@ Edit `.env` to customize:
 | `POSTGRES_PASSWORD` | aria_dev_password | Database password |
 | `SECRET_KEY` | (dev key) | App secret - **change in production!** |
 | `JWT_SECRET_KEY` | (dev key) | JWT secret - **change in production!** |
+| `OLLAMA_BASE_URL` | host.docker.internal:11434 | Ollama API endpoint |
+| `OLLAMA_MODEL` | qwen2.5:7b | LLM model to use |
 
 ## Development
 
