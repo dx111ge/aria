@@ -1,0 +1,137 @@
+# Aria Production Docker Compose
+# Uses pre-built images from Docker Hub for fast deployment
+#
+# Quick Start:
+#   1. cp .env.example .env
+#   2. docker compose -f docker-compose.prod.yml up -d
+#   3. Open http://localhost:3001
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: aria-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aria}
+      POSTGRES_USER: ${POSTGRES_USER:-aria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aria_dev_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - aria_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aria}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aria-network
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: aria-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - aria_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aria-network
+    restart: unless-stopped
+
+  # Executor Service - Isolated code/command execution
+  executor:
+    image: dx111ge/aria-executor:latest
+    container_name: aria-executor
+    networks:
+      - aria-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Backend API
+  backend:
+    image: dx111ge/aria-backend:latest
+    container_name: aria-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aria}:${POSTGRES_PASSWORD:-aria_dev_password}@postgres:5432/${POSTGRES_DB:-aria}
+      DATABASE_URL_SYNC: postgresql://${POSTGRES_USER:-aria}:${POSTGRES_PASSWORD:-aria_dev_password}@postgres:5432/${POSTGRES_DB:-aria}
+      REDIS_URL: redis://redis:6379/0
+      EXECUTOR_URL: http://executor:8000
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
+    ports:
+      - "${BACKEND_PORT:-8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      executor:
+        condition: service_healthy
+    networks:
+      - aria-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Application
+  frontend:
+    image: dx111ge/aria-frontend:latest
+    container_name: aria-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8001}
+      BACKEND_URL: http://backend:8000
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://127.0.0.1:3001}
+      NODE_ENV: production
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - aria-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  aria_postgres_data:
+    driver: local
+  aria_redis_data:
+    driver: local
+
+networks:
+  aria-network:
+    driver: bridge
